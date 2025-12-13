@@ -215,18 +215,18 @@ export default function EventDashboardPage() {
           </div>
         </div>
 
-        {/* Quick Actions - Show QR Scanner if event is today */}
-        {stats.isEventToday && !stats.isEventPast && (
-          <Button
-            size="lg"
-            // variant="outline"
-            className="mb-8 w-full gap-2 h-10 bg-linear-to-r from-orange-500 via-pink-500 to-red-500 text-white hover:scale-[1.02]"
-            onClick={() => setShowQRScanner(true)}
-          >
-            <QrCode className="w-6 h-6" />
-            Scan QR Code to Check-In
-          </Button>
-        )}
+       {/* Quick Actions - QR Scanner */}
+{!stats.isEventPast && (
+  <Button
+    size="lg"
+    className="mb-8 w-full gap-2 h-10 bg-linear-to-r from-orange-500 via-pink-500 to-red-500 text-white hover:scale-[1.02]"
+    onClick={() => setShowQRScanner(true)}
+  >
+    <QrCode className="w-6 h-6" />
+    Scan QR Code to Check-In
+  </Button>
+)}
+
 
         {/* Stats Grid */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">

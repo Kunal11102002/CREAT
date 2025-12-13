@@ -184,8 +184,7 @@ export default function CreateEventPage() {
         ticketType: data.ticketType,
         ticketPrice: data.ticketPrice || undefined,
         coverImage: data.coverImage || undefined,
-        themeColor: data.themeColor,
-        hasPro,
+        themeColor: data.themeColor
       });
 
       toast.success("Event created successfully! 🎉");

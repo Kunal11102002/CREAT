@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { QrCode, Loader2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { QrCode, Loader2, Upload, X } from "lucide-react";
+import { toast } from "sonner";
+
 import { useConvexMutation } from "@/hooks/use-convex-query";
 import { api } from "@/convex/_generated/api";
-import { toast } from "sonner";
 
 import {
   Dialog,
@@ -14,146 +15,183 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
+import { Button } from "@/components/ui/button";
+
 export default function QRScannerModal({ isOpen, onClose }) {
-  const [scannerReady, setScannerReady] = useState(false);
+  const scannerRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   const { mutate: checkInAttendee } = useConvexMutation(
     api.registrations.checkInAttendee
   );
 
-  const handleCheckIn = async (qrCode) => {
+  // ===============================
+  // Handle QR result
+  // ===============================
+  const handleResult = async (qrCode) => {
     try {
-      const result = await checkInAttendee({ qrCode });
-
-      if (result.success) {
-        toast.success("✅ Check-in successful!");
-        onClose();
-      } else {
-        toast.error(result.message || "Check-in failed");
-      }
-    } catch (error) {
-      toast.error(error.message || "Invalid QR code");
+      await checkInAttendee({ qrCode });
+      toast.success("✅ Check-in successful");
+      safeClose();
+    } catch {
+      toast.error("Invalid or already used QR code");
     }
   };
 
-  // Initialize QR Scanner
+  // ===============================
+  // SAFELY close scanner
+  // ===============================
+  const safeClose = () => {
+    if (scannerRef.current) {
+      scannerRef.current.stop().catch(() => {});
+      scannerRef.current.clear().catch(() => {});
+      scannerRef.current = null;
+    }
+    onClose();
+  };
+
+  // ===============================
+  // Start CAMERA scanner
+  // ===============================
   useEffect(() => {
-    let scanner = null;
-    let mounted = true;
+    if (!isOpen) return;
+    if (scannerRef.current) return; //  prevent double start
 
-    const initScanner = async () => {
-      if (!isOpen) return;
+    let cancelled = false;
 
+    const startCamera = async () => {
       try {
-        console.log("Initializing QR scanner...");
+        setLoading(true);
+        setError(null);
 
-        // Check camera permissions first
-        try {
-          await navigator.mediaDevices.getUserMedia({ video: true });
-          console.log("Camera permission granted");
-        } catch (permError) {
-          console.error("Camera permission denied:", permError);
-          setError("Camera permission denied. Please enable camera access.");
-          return;
-        }
+        //  wait for Dialog DOM
+        await new Promise((r) => setTimeout(r, 500));
+        if (cancelled) return;
 
-        // Dynamically import the library
-        const { Html5QrcodeScanner } = await import("html5-qrcode");
+        const { Html5Qrcode } = await import("html5-qrcode");
 
-        if (!mounted) return;
+        const scanner = new Html5Qrcode("qr-reader");
+        scannerRef.current = scanner;
 
-        console.log("Creating scanner instance...");
-
-        scanner = new Html5QrcodeScanner(
-          "qr-reader",
+        await scanner.start(
+          { facingMode: "environment" },
           {
             fps: 10,
-            qrbox: { width: 250, height: 250 },
-            aspectRatio: 1.0,
-            showTorchButtonIfSupported: true,
-            videoConstraints: {
-              facingMode: "environment", // Use back camera on mobile
-            },
+            qrbox: 250,
+            disableFlip: false,
+            showTorchButtonIfSupported: false,
+            showZoomSliderIfSupported: false,
           },
-          /* verbose= */ false
+          async (decodedText) => {
+            await scanner.stop();
+            scannerRef.current = null;
+            handleResult(decodedText);
+          }
         );
 
-        const onScanSuccess = (decodedText) => {
-          console.log("QR Code detected:", decodedText);
-          if (scanner) {
-            scanner.clear().catch(console.error);
-          }
-          handleCheckIn(decodedText);
-        };
-
-        const onScanError = (error) => {
-          // Only log actual errors, not "no QR code found" messages
-          if (error && !error.includes("NotFoundException")) {
-            console.debug("Scan error:", error);
-          }
-        };
-
-        scanner.render(onScanSuccess, onScanError);
-        setScannerReady(true);
-        setError(null);
-        console.log("Scanner rendered successfully");
-      } catch (error) {
-        console.error("Failed to initialize scanner:", error);
-        setError(`Failed to start camera: ${error.message}`);
-        toast.error("Camera failed. Please use manual entry.");
+        setLoading(false);
+      } catch (err) {
+        console.error(err);
+        setError("Camera stopped. Please close and reopen scanner.");
+        setLoading(false);
       }
     };
 
-    initScanner();
+    startCamera();
 
     return () => {
-      mounted = false;
-      if (scanner) {
-        console.log("Cleaning up scanner...");
-        scanner.clear().catch(console.error);
+      cancelled = true;
+      if (scannerRef.current) {
+        scannerRef.current.stop().catch(() => {});
+        scannerRef.current.clear().catch(() => {});
+        scannerRef.current = null;
       }
-      setScannerReady(false);
     };
   }, [isOpen]);
 
+  // ===============================
+  // Scan from IMAGE
+  // ===============================
+  const handleImageScan = async (file) => {
+    if (!file) return;
+
+    try {
+      setLoading(true);
+
+      const { Html5Qrcode } = await import("html5-qrcode");
+      const scanner = new Html5Qrcode("qr-reader");
+
+      const decodedText = await scanner.scanFile(file, true);
+      handleResult(decodedText);
+    } catch {
+      toast.error("No QR code found in image");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-md">
+    <Dialog open={isOpen} onOpenChange={safeClose}>
+      <DialogContent forceMount className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <QrCode className="w-5 h-5 text-purple-500" />
-            Check-In Attendee
+            Scan QR Code
           </DialogTitle>
           <DialogDescription>
-            Scan QR code or enter ticket ID manually
+            Use camera or upload a QR image
           </DialogDescription>
         </DialogHeader>
 
-        {error ? (
-          <div className="text-red-500 text-sm">{error}</div>
-        ) : (
-          <>
-            <div
-              id="qr-reader"
-              className="w-full"
-              style={{ minHeight: "350px" }}
-            ></div>
-            {!scannerReady && (
-              <div className="flex items-center justify-center py-4">
-                <Loader2 className="w-6 h-6 animate-spin text-purple-500" />
-                <span className="ml-2 text-sm text-muted-foreground">
-                  Starting camera...
-                </span>
-              </div>
-            )}
-            <p className="text-sm text-muted-foreground text-center">
-              {scannerReady
-                ? "Position the QR code within the frame"
-                : "Please allow camera access when prompted"}
-            </p>
-          </>
+        {error && (
+          <p className="text-sm text-red-500 mb-2">{error}</p>
         )}
+
+        {/* CAMERA VIEW */}
+        <div
+          id="qr-reader"
+          className="w-full rounded-md bg-black"
+          style={{ minHeight: "300px" }}
+        />
+
+        {loading && (
+          <div className="flex items-center justify-center gap-2 py-3">
+            <Loader2 className="w-5 h-5 animate-spin text-purple-500" />
+            <span className="text-sm">Processing…</span>
+          </div>
+        )}
+
+        {/* ACTION BUTTONS */}
+        <div className="flex gap-2 mt-4">
+          <Button
+            variant="outline"
+            className="flex-1 gap-2"
+            onClick={() => fileInputRef.current.click()}
+          >
+            <Upload className="w-4 h-4" />
+            Scan Image
+          </Button>
+
+          <Button
+            variant="destructive"
+            className="flex-1 gap-2"
+            onClick={safeClose}
+          >
+            <X className="w-4 h-4" />
+            Close
+          </Button>
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={(e) => handleImageScan(e.target.files[0])}
+          />
+        </div>
       </DialogContent>
     </Dialog>
   );
